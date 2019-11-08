@@ -84,12 +84,10 @@ commands:
         type: string
         default: "" # if unset, e2e-test.sh specifies the command
     steps:
-      - checkout
-      - run: ./scripts/assert-changed-files.sh "<< parameters.trigger_pattern >>|<< parameters.test_path >>/*"
-      - <<: *restore_cache
-      - <<: *install_node_modules
-      - <<: *persist_cache
       - <<: *attach_to_bootstrap
+      - <<: *restore_cache
+      - run: ./scripts/assert-changed-files.sh "<< parameters.trigger_pattern >>|<< parameters.test_path >>/*"
+      - run: yarn list react
       - run: ./scripts/e2e-test.sh "<< parameters.test_path >>" "<< parameters.test_command >>"
 
 version: 2.1
@@ -315,90 +313,130 @@ jobs:
           name: "Run Tests"
           command: yarn test
 
+  bootstrap-with-experimental-react:
+    executor: node
+    parameters:
+      version:
+        type: string
+        default: "next"
+    steps:
+      - checkout
+      - <<: *restore_cache
+      - run:
+          name: "Update React to prerelease"
+          command: "REACT_CHANNEL=<< parameters.version >> node ./scripts/upgrade-react"
+      - run: yarn install
+      - run: yarn bootstrap -- concurrency=2
+      - run: yarn list react
+      - persist_to_workspace:
+          root: packages
+          paths:
+            - "*"
+
 workflows:
   version: 2
-  build-test:
+  nightly-react-next:
+    # triggers:
+    #   - schedule:
+    #       cron: "0 2,6,10,14,18,22 * * *"
+    #       filters:
+    #         branches:
+    #           only:
+    #             - master
     jobs:
-      - windows_unit_tests
-      - bootstrap
-      - lint:
-          requires:
-            - bootstrap
-      - unit_tests_node8:
-          <<: *ignore_docs
-          requires:
-            - bootstrap
-      - unit_tests_node10:
-          <<: *ignore_docs
-          requires:
-            - lint
-            - unit_tests_node8
-      - unit_tests_node12:
-          <<: *ignore_docs
-          requires:
-            - lint
-            - unit_tests_node8
-      - unit_tests_www:
-          requires:
-            - lint
-            - unit_tests_node8
-      - integration_tests_long_term_caching:
-          <<: *e2e-test-workflow
-      - integration_tests_gatsby_pipeline:
-          <<: *e2e-test-workflow
-      - integration_tests_structured_logging:
-          <<: *e2e-test-workflow
-      - e2e_tests_path-prefix:
-          <<: *e2e-test-workflow
+      - bootstrap-with-experimental-react:
+          version: "next"
       - e2e_tests_gatsby-image:
-          <<: *e2e-test-workflow
+          requires:
+            - bootstrap-with-experimental-react
       - e2e_tests_development_runtime:
-          <<: *e2e-test-workflow
+          requires:
+            - bootstrap-with-experimental-react
       - e2e_tests_production_runtime:
-          <<: *e2e-test-workflow
-      - themes_e2e_tests_production_runtime:
-          <<: *e2e-test-workflow
-      - themes_e2e_tests_development_runtime:
-          <<: *e2e-test-workflow
-      - starters_validate:
-          <<: *ignore_master
-      - starters_publish:
-          filters:
-            branches:
-              only:
-                - master
-      - manual_www_approval:
-          type: approval
-          filters:
-            branches:
-              only:
-                - master
-      - build_www:
-          context: build_www
           requires:
-            - manual_www_approval
-      - deploy_www:
-          requires:
-            - build_www
-          context: build_www
-      - update_i18n_source:
-          filters:
-            branches:
-              only:
-                - master
-  www_deploy:
-    triggers:
-      - schedule:
-          cron: "0 2,6,10,14,18,22 * * *"
-          filters:
-            branches:
-              only:
-                - master
-    jobs:
-      - build_www:
-          # Check CircleCI web ui for context details (env vars)
-          context: build_www
-      - deploy_www:
-          requires:
-            - build_www
-          context: build_www
+            - bootstrap-with-experimental-react
+  # build-test:
+  #   jobs:
+  #     - windows_unit_tests
+  #     - bootstrap
+  #     - lint:
+  #         requires:
+  #           - bootstrap
+  #     - unit_tests_node8:
+  #         <<: *ignore_docs
+  #         requires:
+  #           - bootstrap
+  #     - unit_tests_node10:
+  #         <<: *ignore_docs
+  #         requires:
+  #           - lint
+  #           - unit_tests_node8
+  #     - unit_tests_node12:
+  #         <<: *ignore_docs
+  #         requires:
+  #           - lint
+  #           - unit_tests_node8
+  #     - unit_tests_www:
+  #         requires:
+  #           - lint
+  #           - unit_tests_node8
+  #     - integration_tests_long_term_caching:
+  #         <<: *e2e-test-workflow
+  #     - integration_tests_gatsby_pipeline:
+  #         <<: *e2e-test-workflow
+  #     - integration_tests_structured_logging:
+  #         <<: *e2e-test-workflow
+  #     - e2e_tests_path-prefix:
+  #         <<: *e2e-test-workflow
+  #     - e2e_tests_gatsby-image:
+  #         <<: *e2e-test-workflow
+  #     - e2e_tests_development_runtime:
+  #         <<: *e2e-test-workflow
+  #     - e2e_tests_production_runtime:
+  #         <<: *e2e-test-workflow
+  #     - themes_e2e_tests_production_runtime:
+  #         <<: *e2e-test-workflow
+  #     - themes_e2e_tests_development_runtime:
+  #         <<: *e2e-test-workflow
+  #     - starters_validate:
+  #         <<: *ignore_master
+  #     - starters_publish:
+  #         filters:
+  #           branches:
+  #             only:
+  #               - master
+  #     - manual_www_approval:
+  #         type: approval
+  #         filters:
+  #           branches:
+  #             only:
+  #               - master
+  #     - build_www:
+  #         context: build_www
+  #         requires:
+  #           - manual_www_approval
+  #     - deploy_www:
+  #         requires:
+  #           - build_www
+  #         context: build_www
+  #     - update_i18n_source:
+  #         filters:
+  #           branches:
+  #             only:
+  #               - master
+  # www_deploy:
+  #   triggers:
+  #     - schedule:
+  #         cron: "0 2,6,10,14,18,22 * * *"
+  #         filters:
+  #           branches:
+  #             only:
+  #               - master
+  #   jobs:
+  #     - build_www:
+  #         # Check CircleCI web ui for context details (env vars)
+  #         context: build_www
+  #     - deploy_www:
+  #         requires:
+  #           - build_www
+  #         context: build_www
